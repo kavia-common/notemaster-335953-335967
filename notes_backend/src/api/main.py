@@ -12,6 +12,20 @@ openapi_tags = [
     {"name": "tags", "description": "Create, update, delete, list and search tags."},
 ]
 
+
+def _split_env_csv(name: str, default: list[str]) -> list[str]:
+    """
+    Split a CSV env var into a list of stripped items, dropping empty entries.
+
+    This avoids common CORS misconfigurations (e.g. trailing commas resulting in empty origins).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    items = [x.strip() for x in raw.split(",")]
+    return [x for x in items if x]
+
+
 app = FastAPI(
     title="NoteMaster API",
     description=(
@@ -22,9 +36,9 @@ app = FastAPI(
     openapi_tags=openapi_tags,
 )
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",") if os.getenv("ALLOWED_ORIGINS") else ["*"]
-allowed_methods = os.getenv("ALLOWED_METHODS", "*").split(",") if os.getenv("ALLOWED_METHODS") else ["*"]
-allowed_headers = os.getenv("ALLOWED_HEADERS", "*").split(",") if os.getenv("ALLOWED_HEADERS") else ["*"]
+allowed_origins = _split_env_csv("ALLOWED_ORIGINS", ["*"])
+allowed_methods = _split_env_csv("ALLOWED_METHODS", ["*"])
+allowed_headers = _split_env_csv("ALLOWED_HEADERS", ["*"])
 cors_max_age = int(os.getenv("CORS_MAX_AGE", "600"))
 
 app.add_middleware(
@@ -56,7 +70,42 @@ def db_config_help():
     return {
         "expects": ["POSTGRES_URL or POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB/POSTGRES_PORT"],
         "example_psql_cmd_source": "notes_database/db_connection.txt (container guidance)",
-        "notes": "Backend will build a postgresql:// URL from POSTGRES_* if POSTGRES_URL is not set.",
+        "notes": (
+            "Backend will build a postgresql:// URL from POSTGRES_* if POSTGRES_URL is not set. "
+            "If POSTGRES_URL starts with postgres:// it will be normalized to postgresql://."
+        ),
+    }
+
+
+@app.get(
+    "/docs/local-preview",
+    tags=["meta"],
+    summary="Local preview wiring help",
+    description="How to point the Next.js frontend to this backend and configure CORS.",
+    operation_id="local_preview_help",
+)
+# PUBLIC_INTERFACE
+def local_preview_help():
+    """
+    Describe the minimal environment variables needed for an end-to-end local preview.
+
+    Returns:
+        A small checklist for backend/frontend wiring.
+    """
+    return {
+        "backend": {
+            "cors": {
+                "ALLOWED_ORIGINS": "Comma-separated list of allowed frontend origins (no spaces).",
+                "example": "http://localhost:3000,https://<your-preview-host>:3000",
+            },
+            "database": {"see": "/docs/db"},
+        },
+        "frontend": {
+            "NEXT_PUBLIC_NOTES_API_BASE_URL": (
+                "Base URL to backend (no trailing slash), e.g. http://localhost:3001"
+            )
+        },
+        "notes": "Frontend expects backend endpoints at /notes and /tags.",
     }
 
 
